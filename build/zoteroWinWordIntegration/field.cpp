@@ -31,9 +31,68 @@
 static COleVariant covOptional((long)DISP_E_PARAMNOTFOUND, VT_ERROR);
 static wchar_t* FIELD_PREFIXES[] = {L" ADDIN ZOTERO_", L" CSL_", NULL};
 static wchar_t* BOOKMARK_PREFIXES[] = {L"ZOTERO_", L"CSL_", NULL};
+static const wchar_t* CAPS_STYLE_NAME = L"Caps";
+static const long WD_STYLE_TYPE_CHARACTER = 2;
 
 statusCode isWholeNote(field_t* field, bool* returnValue);
 statusCode setTextAndNoteLocations(field_t* field);
+
+static bool getCapsStyleSmallCaps(document_t *doc, bool *returnValue) {
+	try {
+		CStyles styles = doc->comDoc.get_Styles();
+		CStyle style(styles.Item(CAPS_STYLE_NAME));
+		if(style.get_Type() != WD_STYLE_TYPE_CHARACTER) return false;
+		CFont0 styleFont = style.get_Font();
+		*returnValue = styleFont.get_SmallCaps() != 0;
+		return true;
+	}
+	catch(CException* e) {
+		e->Delete();
+		return false;
+	}
+	catch(...) {
+		return false;
+	}
+}
+
+static void applyCapsStyleToRange(CRange *baseRange, long start, long end, bool capsStyleUsesSmallCaps) {
+	if(start >= end) return;
+	CRange runRange = baseRange->get_Duplicate();
+	runRange.SetRange(start, end);
+	runRange.put_Style(CAPS_STYLE_NAME);
+	if(!capsStyleUsesSmallCaps) {
+		CFont0 runFont = runRange.get_Font();
+		runFont.put_SmallCaps(0);
+	}
+}
+
+static void applyCapsStyleToSmallCaps(document_t *doc, CRange *range) {
+	bool capsStyleUsesSmallCaps = false;
+	if(!getCapsStyleSmallCaps(doc, &capsStyleUsesSmallCaps)) return;
+
+	long start = range->get_Start();
+	long end = range->get_End();
+	long runStart = -1;
+
+	for(long pos = start; pos < end; pos++) {
+		CRange charRange = range->get_Duplicate();
+		charRange.SetRange(pos, pos + 1);
+		CFont0 charFont = charRange.get_Font();
+		bool isSmallCaps = charFont.get_SmallCaps() != 0;
+
+		if(isSmallCaps && runStart == -1) {
+			runStart = pos;
+		}
+		else if(!isSmallCaps && runStart != -1) {
+			applyCapsStyleToRange(range, runStart, pos, capsStyleUsesSmallCaps);
+			runStart = -1;
+		}
+	}
+
+	if(runStart != -1) {
+		applyCapsStyleToRange(range, runStart, end, capsStyleUsesSmallCaps);
+	}
+}
 
 // Allocates a field structure based on a CField, optionally checking to make
 // sure that the field code actually matches a Zotero field.
@@ -378,6 +437,10 @@ statusCode __stdcall setText(field_t* field, const wchar_t string[], bool isRich
 		if(wcsncmp(field->code, L"BIBL", 4) == 0) {
 			setStyle(field->doc, &field->comContentRange, BIBLIOGRAPHY_STYLE_ENUM, BIBLIOGRAPHY_STYLE_NAME);
 		}
+
+		if(wcsstr(string, L"\\scaps")) {
+			applyCapsStyleToSmallCaps(field->doc, &field->comContentRange);
+		}
 	} else {
 		CFont0 comFont = field->comContentRange.get_Font();
 		comFont.Reset();
@@ -616,4 +679,3 @@ statusCode setTextAndNoteLocations(field_t* field) {
 	return STATUS_OK;
 	HANDLE_EXCEPTIONS_END
 }
- 
