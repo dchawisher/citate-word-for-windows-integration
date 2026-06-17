@@ -29,10 +29,14 @@
 #include "zoteroWinWordIntegration.h"
 
 static COleVariant covOptional((long)DISP_E_PARAMNOTFOUND, VT_ERROR);
+static COleVariant covTrue((short)VARIANT_TRUE, VT_BOOL);
 static wchar_t* FIELD_PREFIXES[] = {L" ADDIN ZOTERO_", L" CSL_", NULL};
 static wchar_t* BOOKMARK_PREFIXES[] = {L"ZOTERO_", L"CSL_", NULL};
 static const wchar_t* CAPS_STYLE_NAME = L"Caps";
 static const long WD_STYLE_TYPE_CHARACTER = 2;
+static const short WD_FIELD_TOA_ENTRY = 74;
+static const long WD_COLLAPSE_END = 0;
+static const wchar_t* TOA_LONG_TEXT_PLACEHOLDER = L"\xE000";
 
 statusCode isWholeNote(field_t* field, bool* returnValue);
 statusCode setTextAndNoteLocations(field_t* field);
@@ -91,6 +95,99 @@ static void applyCapsStyleToSmallCaps(document_t *doc, CRange *range) {
 
 	if(runStart != -1) {
 		applyCapsStyleToRange(range, runStart, end, capsStyleUsesSmallCaps);
+	}
+}
+
+static CString escapeTOAFieldArgument(const wchar_t* value) {
+	CString escaped;
+	for(const wchar_t* p = value; p && *p; p++) {
+		if(*p == L'\\' || *p == L'"') {
+			escaped.AppendChar(L'\\');
+			escaped.AppendChar(*p);
+		}
+		else if(*p == L'\r' || *p == L'\n') {
+			escaped.AppendChar(L' ');
+		}
+		else {
+			escaped.AppendChar(*p);
+		}
+	}
+	return escaped;
+}
+
+static void insertRTFIntoRange(document_t *doc, CRange *range, const wchar_t string[]) {
+	char* utf8String;
+	int nBytes = WideCharToMultiByte(CP_UTF8, 0, string, -1, NULL, 0, NULL, NULL);
+	utf8String = new char[nBytes];
+	WideCharToMultiByte(CP_UTF8, 0, string, -1, utf8String, nBytes, NULL, NULL);
+
+	DWORD nWritten;
+	HANDLE tempFileHandle = getTemporaryFile();
+	WriteFile(tempFileHandle, utf8String, nBytes-1, &nWritten, NULL);
+	SetEndOfFile(tempFileHandle);
+	delete[] utf8String;
+
+	range->put_Text(L"");
+	insertTemporaryFile(range);
+
+	if(!wcsstr(string, L"\\\r") && !wcsstr(string, L"\\par") && !wcsstr(string, L"\\\n")) {
+		CRange toDelete = range->get_Duplicate();
+		toDelete.Collapse(0);
+		toDelete.MoveStart(1, -1);
+		if(toDelete.get_Text() != L"\x0d") {
+			toDelete.Collapse(0);
+			toDelete.MoveEnd(1, 1);
+		}
+		toDelete.put_Text(L"");
+	}
+
+	if(wcsstr(string, L"\\scaps")) {
+		applyCapsStyleToSmallCaps(doc, range);
+	}
+}
+
+static void clearTOAMarks(CRange *range) {
+	CFields fields = range->get_Fields();
+	long count = fields.get_Count();
+	for(long i = count; i >= 1; i--) {
+		CField field = fields.Item(i);
+		if(field.get_Type() == WD_FIELD_TOA_ENTRY) {
+			field.Delete();
+		}
+	}
+}
+
+static void insertTOAMark(field_t* field, const wchar_t shortCitation[],
+						  const wchar_t longCitation[], unsigned short category,
+						  bool isInitial) {
+	CRange insertRange = field->comContentRange.get_Duplicate();
+	insertRange.Collapse(WD_COLLAPSE_END);
+
+	CString escapedShortCitation = escapeTOAFieldArgument(shortCitation);
+	CString code;
+	if(isInitial && longCitation && longCitation[0]) {
+		code.Format(L"\\l \"%s\" \\s \"%s\" \\c %u",
+			TOA_LONG_TEXT_PLACEHOLDER, escapedShortCitation.GetString(), category);
+	}
+	else {
+		code.Format(L"\\s \"%s\" \\c %u", escapedShortCitation.GetString(), category);
+	}
+
+	CFields fields = field->doc->comDoc.get_Fields();
+	CField toaField = fields.Add(insertRange, COleVariant(WD_FIELD_TOA_ENTRY), COleVariant(code.GetString()), covTrue);
+
+	if(isInitial && longCitation && longCitation[0]) {
+		CRange codeRange = toaField.get_Code();
+		CString codeText = codeRange.get_Text();
+		int placeholderLocation = codeText.Find(TOA_LONG_TEXT_PLACEHOLDER);
+		if(placeholderLocation != -1) {
+			CRange longTextRange = codeRange.get_Duplicate();
+			longTextRange.SetRange(
+				codeRange.get_Start() + placeholderLocation,
+				codeRange.get_Start() + placeholderLocation + (long) wcslen(TOA_LONG_TEXT_PLACEHOLDER)
+			);
+			insertRTFIntoRange(field->doc, &longTextRange, longCitation);
+		}
 	}
 }
 
@@ -462,6 +559,32 @@ statusCode __stdcall setText(field_t* field, const wchar_t string[], bool isRich
 		comRange.Collapse(0 /*wdCollapseEnd*/);
 		comRange.Select();
 	}
+
+	return STATUS_OK;
+	HANDLE_EXCEPTIONS_END
+}
+
+// Sets Table of Authorities marks inside this field result.
+statusCode __stdcall setTOAMarks(field_t* field, const wchar_t* shortCitations[],
+								 const wchar_t* longCitations[], unsigned short categories[],
+								 bool isInitial[], unsigned long count) {
+	HANDLE_EXCEPTIONS_BEGIN
+	setScreenUpdatingStatus(field->doc, false);
+
+	clearTOAMarks(&field->comContentRange);
+	for(unsigned long i = 0; i < count; i++) {
+		insertTOAMark(field, shortCitations[i], longCitations[i], categories[i], isInitial[i]);
+	}
+
+	if(field->comBookmark) {
+		field->comContentRange = field->comBookmark.get_Range();
+		field->comCodeRange = field->comContentRange;
+	}
+	else {
+		field->comContentRange = field->comField.get_Result();
+		field->comCodeRange = field->comField.get_Code();
+	}
+	setTextAndNoteLocations(field);
 
 	return STATUS_OK;
 	HANDLE_EXCEPTIONS_END

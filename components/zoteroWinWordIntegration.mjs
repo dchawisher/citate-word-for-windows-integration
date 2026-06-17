@@ -158,6 +158,13 @@ function init() {
 		// statusCode setText(Field* field, const jschar string[], bool isRich);
 		setText: lib.declare("setText", ctypes.stdcall_abi, statusCode, field_t.ptr,
 			ctypes.jschar.ptr, ctypes.bool),
+
+		// statusCode setTOAMarks(Field* field, const jschar* shortCitations[],
+		//		const jschar* longCitations[], unsigned short categories[],
+		//		bool isInitial[], unsigned long count);
+		setTOAMarks: lib.declare("setTOAMarks", ctypes.stdcall_abi, statusCode, field_t.ptr,
+			ctypes.jschar.ptr.ptr, ctypes.jschar.ptr.ptr, ctypes.unsigned_short.ptr,
+			ctypes.bool.ptr, ctypes.unsigned_long),
 			
 		// statusCode getText(Field* field, jschar** returnValue);
 		getText: lib.declare("getText", ctypes.stdcall_abi, statusCode, field_t.ptr,
@@ -473,6 +480,25 @@ Field.prototype = {
 		Zotero.debug("ZoteroWinWordIntegration: setText", 4);
 		checkIfFreed(this._documentStatus);
 		checkStatus(f.setText(this._field_t, text, isRich));
+	},
+
+	setTOAMarks: function(marks) {
+		Zotero.debug("ZoteroWinWordIntegration: setTOAMarks", 4);
+		checkIfFreed(this._documentStatus);
+
+		let shortCitations = marks.map(mark => ctypes.jschar.array()(mark.shortCitation || ""));
+		let longCitations = marks.map(mark => ctypes.jschar.array()(mark.longCitation || ""));
+		let categories = marks.map(mark => mark.category);
+		let isInitial = marks.map(mark => !!mark.isInitial);
+
+		checkStatus(f.setTOAMarks(
+			this._field_t,
+			ctypes.jschar.ptr.array()(shortCitations),
+			ctypes.jschar.ptr.array()(longCitations),
+			ctypes.unsigned_short.array()(categories),
+			ctypes.bool.array()(isInitial),
+			marks.length
+		));
 	},
 	
 	getText: function() {
