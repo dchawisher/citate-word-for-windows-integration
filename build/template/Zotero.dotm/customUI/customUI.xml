@@ -5,7 +5,7 @@
       <tab id="ZoteroTab" getLabel="ZoteroRibbon.ZoteroTabLabel" insertBeforeMso="TabAddIns" keytip="C">
         <group id="ZoteroGroup" image="zoteroz16" label="Zotero">
           <button id="InsertZoteroCitationButton" label="Add/Edit Citation" size="large" image="addEditZoteroCitation" onAction="ZoteroRibbon.ZoteroRibbonAddEditCitation" supertip="Insert a new citation, or edit the citation at the current cursor position" keytip="C"/>
-          <button id="InsertZoteroBibliographyButton" label="Add/Edit Bibliography" size="large" image="addEditZoteroBibliography" onAction="ZoteroRibbon.ZoteroRibbonAddEditBibliography" supertip="Insert a new bibliography, or edit the existing bibliography, at the current cursor position" keytip="B"/>
+          <button id="InsertZoteroBibliographyButton" label="Document Tools" size="large" image="addEditZoteroBibliography" onAction="ZoteroRibbon.ZoteroRibbonAddEditBibliography" supertip="Manage document citations, authorities, bibliography, and preferences" keytip="B"/>
           <separator id="ZoteroSeparator1"/>
           <button id="InsertZoteroAnnotationButton" label="Add Annotation" size="large" image="addZoteroAnnotation" onAction="ZoteroRibbon.ZoteroRibbonAddAnnotation" supertip="Insert an annotation at the current cursor position" keytip="A"/>
           <button id="InsertZoteroNoteButton" label="Add Note" size="large" image="addZoteroNote" onAction="ZoteroRibbon.ZoteroRibbonAddNote" supertip="Insert a new note at the current cursor position" keytip="N"/>
