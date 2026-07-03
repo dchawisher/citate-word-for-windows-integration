@@ -344,7 +344,11 @@ Document.prototype = {
 		var fields = [];
 		while (fnum.hasMoreElements()) {
 			fields.push(fnum.getNext());
-			await Zotero.Promise.delay();
+			// Yield to the event loop periodically, not per field -- each yield
+			// costs an event-loop turn, which adds up over hundreds of fields
+			if (fields.length % 32 == 0) {
+				await Zotero.Promise.delay();
+			}
 		}
 		return fields;
 	},
@@ -402,7 +406,11 @@ Document.prototype = {
 		var fields = [];
 		while (fnum.hasMoreElements()) {
 			fields.push(fnum.getNext());
-			await Zotero.Promise.delay();
+			// Yield to the event loop periodically, not per field -- each yield
+			// costs an event-loop turn, which adds up over hundreds of fields
+			if (fields.length % 32 == 0) {
+				await Zotero.Promise.delay();
+			}
 		}
 		return fields;
 	},
