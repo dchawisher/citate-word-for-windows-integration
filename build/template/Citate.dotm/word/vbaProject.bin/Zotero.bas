@@ -1,4 +1,4 @@
-Attribute VB_Name = "Citate"
+Attribute VB_Name = "Zotero"
 ' ***** BEGIN LICENSE BLOCK *****
 '
 ' Copyright (c) 2015  Zotero
@@ -177,9 +177,9 @@ Function EnumWindowsCallback(ByVal hwnd As Long, ByVal lParams As Long) As Long 
 
     retVal = GetClassName(hwnd, windowClass, 255)
     windowClass = Left$(windowClass, retVal)
-    zoteroPosition = InStr(windowClass, "Mozilla_zotero_")
+    zoteroPosition = InStr(windowClass, "Mozilla_citate_")
     remoteWindowPosition = InStr(windowClass, "RemoteWindow")
-    ' Looking for window name like `Mozilla_zotero_%profileName%_RemoteWindow`
+    ' Looking for window name like `Mozilla_citate_%profileName%_RemoteWindow`
     ' which is not configurable and used to be much simpler in Z6 - `ZoteroMessageWindow`
     If zoteroPosition <> 0 And remoteWindowPosition <> 0 Then
         ZotWnd = hwnd
