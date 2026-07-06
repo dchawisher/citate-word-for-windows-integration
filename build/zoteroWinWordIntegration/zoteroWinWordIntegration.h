@@ -253,6 +253,8 @@ extern "C" {
 	__declspec(dllexport) statusCode __stdcall insertTableOfAuthorities(document_t *doc);
 	__declspec(dllexport) statusCode __stdcall convertPlaceholdersToFields(document_t *doc, const wchar_t* placeholders[], const unsigned long nPlaceholders,
 		const unsigned short noteType, const wchar_t fieldType[], listNode_t** returnNode);
+	__declspec(dllexport) statusCode __stdcall convertTokensToFields(document_t *doc, const wchar_t* tokens[], const unsigned long nTokens,
+		const unsigned short noteType, const wchar_t fieldType[], listNode_t** returnNode);
 	__declspec(dllexport) statusCode __stdcall cleanup(document_t *doc);
 	__declspec(dllexport) statusCode __stdcall complete(document_t *doc);
 }

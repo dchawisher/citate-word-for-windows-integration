@@ -1105,6 +1105,152 @@ statusCode __stdcall convertPlaceholdersToFields(document_t *doc, const wchar_t*
 	HANDLE_EXCEPTIONS_END
 }
 
+static bool getDispidByName(IDispatch* dispatch, const wchar_t* name, DISPID* dispid) {
+	LPOLESTR names[] = { (LPOLESTR) name };
+	return SUCCEEDED(dispatch->GetIDsOfNames(IID_NULL, names, 1, LOCALE_USER_DEFAULT, dispid));
+}
+
+static bool putFindBoolProperty(COleDispatchDriver& comFind, const wchar_t* name, BOOL value) {
+	DISPID dispid;
+	if (!getDispidByName(comFind.m_lpDispatch, name, &dispid)) {
+		return false;
+	}
+	static BYTE parms[] = VTS_BOOL;
+	comFind.InvokeHelper(dispid, DISPATCH_PROPERTYPUT, VT_EMPTY, NULL, parms, value);
+	return true;
+}
+
+// Runs Word's Find over comRange for the literal findText. The generated COM wrappers
+// do not cover the Find object, so it is driven by name through IDispatch. On success
+// comRange is redefined to the matched text and true is returned.
+static bool findNextInRange(CRange& comRange, const wchar_t* findText) {
+	DISPID dispid;
+	if (!getDispidByName(comRange.m_lpDispatch, L"Find", &dispid)) {
+		return false;
+	}
+	LPDISPATCH findDispatch = NULL;
+	comRange.InvokeHelper(dispid, DISPATCH_PROPERTYGET, VT_DISPATCH, (void*) &findDispatch, NULL);
+	if (!findDispatch) {
+		return false;
+	}
+	COleDispatchDriver comFind(findDispatch);
+
+	if (!getDispidByName(comFind.m_lpDispatch, L"Text", &dispid)) {
+		return false;
+	}
+	static BYTE bstrParms[] = VTS_BSTR;
+	comFind.InvokeHelper(dispid, DISPATCH_PROPERTYPUT, VT_EMPTY, NULL, bstrParms, findText);
+
+	if (!getDispidByName(comFind.m_lpDispatch, L"Wrap", &dispid)) {
+		return false;
+	}
+	static BYTE longParms[] = VTS_I4;
+	comFind.InvokeHelper(dispid, DISPATCH_PROPERTYPUT, VT_EMPTY, NULL, longParms,
+		(long) 0 /* wdFindStop */);
+
+	if (!putFindBoolProperty(comFind, L"Forward", TRUE)
+			|| !putFindBoolProperty(comFind, L"MatchCase", TRUE)
+			|| !putFindBoolProperty(comFind, L"MatchWholeWord", FALSE)
+			|| !putFindBoolProperty(comFind, L"MatchWildcards", FALSE)
+			|| !putFindBoolProperty(comFind, L"MatchSoundsLike", FALSE)
+			|| !putFindBoolProperty(comFind, L"MatchAllWordForms", FALSE)
+			|| !putFindBoolProperty(comFind, L"Format", FALSE)) {
+		return false;
+	}
+
+	if (!getDispidByName(comFind.m_lpDispatch, L"Execute", &dispid)) {
+		return false;
+	}
+	BOOL found = FALSE;
+	comFind.InvokeHelper(dispid, DISPATCH_METHOD, VT_BOOL, (void*) &found, NULL);
+	return found != FALSE;
+}
+
+// Finds each token's first occurrence outside a field within the paragraph containing
+// the selection and converts it to an (empty) field coded TEMP, mirroring
+// convertPlaceholdersToFields. Tokens that are not found are skipped, so the returned
+// list can be shorter than nTokens; callers converting one token per call get an
+// unambiguous mapping.
+statusCode __stdcall convertTokensToFields(document_t *doc, const wchar_t* tokens[], const unsigned long nTokens,
+		const unsigned short noteType, const wchar_t fieldType[], listNode_t** returnNode) {
+	HANDLE_EXCEPTIONS_BEGIN
+	if (wcscmp(fieldType, L"Field") != 0) {
+		DIE(L"Field type not implemented");
+	}
+
+	listNode_t* fieldListStart = NULL;
+	listNode_t* fieldListEnd = NULL;
+
+	for (unsigned long i = 0; i < nTokens; i++) {
+		// Re-derive the paragraph per token, since each conversion edits it
+		CSelection comSelection = doc->comWindow.get_Selection();
+		CRange comTempRange = comSelection.get_Range();
+		CRange comSearchRange = comTempRange.get_Duplicate();
+		comSearchRange.Expand(4 /* wdParagraph */);
+		long paragraphEnd = comSearchRange.get_End();
+
+		bool located = false;
+		while (findNextInRange(comSearchRange, tokens[i])) {
+			// Guard against Find running past the end of the paragraph
+			if (comSearchRange.get_End() > paragraphEnd) {
+				break;
+			}
+			// Best-effort skip of occurrences within existing fields (e.g. text of
+			// a rendered citation)
+			CFields comFields = comSearchRange.get_Fields();
+			if (comFields.get_Count() > 0) {
+				comSearchRange.Collapse(0 /* wdCollapseEnd */);
+				comSearchRange.put_End(paragraphEnd);
+				continue;
+			}
+			located = true;
+			break;
+		}
+		if (!located) {
+			continue;
+		}
+
+		CRange insertRange = comSearchRange.get_Duplicate();
+		field_t *newField;
+
+		if (insertRange.get_StoryType() == 1) {
+			insertRange.put_Text(L"");
+			// If inserting a note citation in the main story, we need to make a new note
+			if (noteType == NOTE_FOOTNOTE) {
+				CFootnotes notes = doc->comDoc.get_Footnotes();
+				CFootnote note = notes.Add(insertRange, covOptional, COleVariant(L""));
+				// Move cursor back to main text
+				CRange referenceRange = note.get_Reference();
+				CRange dupRange = referenceRange.get_Duplicate();
+				dupRange.Collapse(0 /*wdCollapseEnd*/);
+				dupRange.Select();
+				// Now inserting field into note
+				insertRange = note.get_Range();
+			}
+			else if (noteType == NOTE_ENDNOTE) {
+				CEndnotes notes = doc->comDoc.get_Endnotes();
+				CEndnote note = notes.Add(insertRange, covOptional, COleVariant(L""));
+				// Move cursor back to main text
+				CRange referenceRange = note.get_Reference();
+				CRange dupRange = referenceRange.get_Duplicate();
+				dupRange.Collapse(0 /*wdCollapseEnd*/);
+				dupRange.Select();
+				// Now inserting field into note
+				insertRange = note.get_Range();
+			}
+		}
+
+		ENSURE_OK(insertFieldRaw(doc, fieldType, insertRange, &newField));
+		if (newField->code) free(newField->code);
+		ENSURE_OK(setCode(newField, L"TEMP"));
+		addValueToList(newField, &fieldListStart, &fieldListEnd);
+	}
+	*returnNode = fieldListStart;
+
+	return STATUS_OK;
+	HANDLE_EXCEPTIONS_END
+}
+
 statusCode __stdcall cleanup(document_t *doc) {
 	HANDLE_EXCEPTIONS_BEGIN
 	if(doc->restoreShowRevisions) {

@@ -139,6 +139,12 @@ function init() {
 			ctypes.jschar.ptr.ptr, ctypes.unsigned_long, ctypes.unsigned_short,
 			ctypes.jschar.ptr, fieldListNode_t.ptr.ptr),
 
+		// statusCode convertTokensToFields(document_t *doc, wchar_t* tokens[],
+		//		unsigned long nTokens, unsigned short noteType, wchar_t fieldType[], listNode_t** returnNode);
+		convertTokensToFields: lib.declare("convertTokensToFields", ctypes.stdcall_abi, statusCode, document_t.ptr,
+			ctypes.jschar.ptr.ptr, ctypes.unsigned_long, ctypes.unsigned_short,
+			ctypes.jschar.ptr, fieldListNode_t.ptr.ptr),
+
 		// statusCode convert(document_t *doc, field_t* fields[], unsigned long nFields,
 		//				      const wchar_t toFieldType[], unsigned short noteType[]);
 		convert: lib.declare("convert", ctypes.stdcall_abi, statusCode, document_t.ptr,
@@ -415,6 +421,32 @@ Document.prototype = {
 		return fields;
 	},
 	
+	convertTokensToFields: async function(tokens, noteType, fieldType) {
+		Zotero.debug("ZoteroWinWordIntegration: convertTokensToFields", 4);
+		checkIfFreed(this._documentStatus);
+		var cTokens = tokens.map(token => ctypes.jschar.array()(token));
+		var fieldListNode = new fieldListNode_t.ptr();
+		checkStatus(
+			f.convertTokensToFields(
+				this._document_t,
+				ctypes.jschar.ptr.array()(cTokens),
+				tokens.length,
+				noteType,
+				fieldType,
+				fieldListNode.address()
+			)
+		);
+		var fnum = new FieldEnumerator(fieldListNode, this._documentStatus);
+		var fields = [];
+		while (fnum.hasMoreElements()) {
+			fields.push(fnum.getNext());
+			if (fields.length % 32 == 0) {
+				await Zotero.Promise.delay();
+			}
+		}
+		return fields;
+	},
+
 	convert: function(fields, toFieldType, toNoteTypes, nFields) {
 		Zotero.debug("ZoteroWinWordIntegration: convert", 4);
 		checkIfFreed(this._documentStatus);
